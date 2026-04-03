@@ -499,10 +499,8 @@ textarea:focus { outline: none; border-color: var(--border-md); }
 </main>
 
 <script>
-// Pointing to your live Render backend
 const API_URL = 'https://recallforge-ulmy.onrender.com/api';
 
-// ── helpers ──
 const $ = id => document.getElementById(id);
 function show(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -511,14 +509,14 @@ function show(id) {
 function showErr(msg) {
   const b = $('err-box');
   b.textContent = msg; b.classList.add('show');
-  setTimeout(() => b.classList.remove('show'), 6000);
+  setTimeout(() => b.classList.remove('show'), 8000);
 }
 
 // ── state ──
 let files = [];
 let questions = [];
 let current = 0;
-let results = []; // 'correct' | 'partial' | 'wrong'
+let results = [];
 let qty = 8;
 
 // ── qty ──
@@ -556,7 +554,21 @@ function renderFiles() {
     b.onclick = () => { files.splice(+b.dataset.i, 1); renderFiles(); });
 }
 
-// ── GENERATE via Cloud ──
+// ── wake server ──
+async function wakeServer() {
+  const maxTries = 12; // 12 × 5s = 60 seconds max
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      const res = await fetch(`${API_URL}/health`, { method: 'GET' });
+      if (res.ok) return true;
+    } catch (e) { /* still sleeping */ }
+    $('loading-msg').textContent = `Server is waking up… (${i + 1}/12) please wait, this only happens once`;
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  throw new Error('Server took too long to wake up. Click Generate again in 10 seconds.');
+}
+
+// ── GENERATE ──
 $('btn-gen').onclick = async () => {
   const pasted = $('paste-area').value.trim();
   if (!files.length && !pasted) { showErr('Please upload a file or paste some text first.'); return; }
@@ -565,40 +577,39 @@ $('btn-gen').onclick = async () => {
   if (!types) { showErr('Select at least one question type.'); return; }
 
   show('screen-loading');
-  $('loading-msg').textContent = 'Uploading files and building Vector database...';
+  $('loading-msg').textContent = 'Contacting server…';
 
   try {
-    // 1. Upload files and text to Python backend
+    // 0. Wake server if sleeping
+    await wakeServer();
+
+    // 1. Upload
+    $('loading-msg').textContent = 'Uploading files and building Vector database...';
     const formData = new FormData();
     formData.append('pasted_text', pasted);
     files.forEach(f => formData.append('files', f));
 
-    const uploadRes = await fetch(`${API_URL}/upload`, {
-      method: 'POST',
-      body: formData
-    });
+    const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+    if (!uploadRes.ok) throw new Error('Upload failed. Please try again.');
 
-    if (!uploadRes.ok) throw new Error('Failed to upload data. Server might be sleeping.');
-
-    // 2. Request question generation
-    $('loading-msg').textContent = 'Gemini is crafting recall questions...';
-    
+    // 2. Generate
+    $('loading-msg').textContent = 'Gemini is crafting recall questions…';
     const genRes = await fetch(`${API_URL}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ qty: qty, types: types })
+      body: JSON.stringify({ qty, types })
     });
-
-    if (!genRes.ok) throw new Error('Failed to generate questions.');
+    if (!genRes.ok) throw new Error('Question generation failed. Please try again.');
 
     const data = await genRes.json();
-    
-    // Parse the JSON string returned by the backend
-    questions = JSON.parse(data.questions);
-    
-    if (!Array.isArray(questions) || questions.length === 0) {
-      throw new Error('No questions generated.');
-    }
+
+    // Handle both raw array and JSON string
+    questions = typeof data.questions === 'string'
+      ? JSON.parse(data.questions)
+      : data.questions;
+
+    if (!Array.isArray(questions) || questions.length === 0)
+      throw new Error('No questions were generated. Try with more content.');
 
     results = [];
     current = 0;
@@ -606,12 +617,17 @@ $('btn-gen').onclick = async () => {
 
   } catch (e) {
     show('screen-upload');
-    showErr(e.message || 'Server error. If using free tier, try again in 10 seconds.');
+    showErr(e.message || 'Something went wrong. Please try again.');
   }
 };
 
 // ── TEST ──
-const typeNames = { fill: 'Fill in the blank', short: 'Short answer', concept: 'Concept check', truefalse: 'True / False' };
+const typeNames = {
+  fill: 'Fill in the blank',
+  short: 'Short answer',
+  concept: 'Concept check',
+  truefalse: 'True / False'
+};
 
 function startTest() {
   show('screen-test');
@@ -630,6 +646,7 @@ function loadQuestion() {
   $('ans-input').disabled = false;
   $('btn-reveal').disabled = false;
   $('btn-check').disabled = false;
+  $('btn-check').textContent = 'Check with AI ✦';
 
   const fb = $('feedback');
   fb.className = 'feedback';
@@ -640,10 +657,9 @@ function loadQuestion() {
 
 $('btn-reveal').onclick = () => {
   const q = questions[current];
-  const fb = $('feedback');
   $('fb-tag').textContent = 'Answer';
   $('fb-body').textContent = q.answer;
-  fb.className = 'feedback info show';
+  $('feedback').className = 'feedback info show';
   $('ans-input').disabled = true;
   $('btn-reveal').disabled = true;
   $('btn-check').disabled = true;
@@ -651,11 +667,11 @@ $('btn-reveal').onclick = () => {
   if (!results[current]) results[current] = 'wrong';
 };
 
-// ── EVALUATE via Cloud ──
+// ── EVALUATE ──
 $('btn-check').onclick = async () => {
   const q = questions[current];
   const userAns = $('ans-input').value.trim();
-  if (!userAns) { return; }
+  if (!userAns) return;
 
   $('btn-check').disabled = true;
   $('btn-reveal').disabled = true;
@@ -674,23 +690,26 @@ $('btn-check').onclick = async () => {
     });
 
     if (!evalRes.ok) throw new Error('Evaluation failed');
-    
-    const data = await evalRes.json();
-    const parsedEval = JSON.parse(data.evaluation);
 
-    let grade = parsedEval.grade || 'wrong';
-    let feedbackText = parsedEval.feedback || '';
+    const data = await evalRes.json();
+
+    // Handle both raw object and JSON string
+    const parsed = typeof data.evaluation === 'string'
+      ? JSON.parse(data.evaluation)
+      : data.evaluation;
+
+    const grade = parsed.grade || 'wrong';
+    const feedbackText = parsed.feedback || '';
 
     results[current] = grade;
 
-    const fb = $('feedback');
     $('fb-tag').textContent = grade === 'correct' ? '✓ Correct' : grade === 'partial' ? '~ Partial' : '✗ Incorrect';
     $('fb-body').textContent = feedbackText + '\n\nModel answer: ' + q.answer;
-    fb.className = `feedback show ${grade === 'correct' ? 'correct' : grade === 'partial' ? 'partial' : 'wrong'}`;
+    $('feedback').className = `feedback show ${grade === 'correct' ? 'correct' : grade === 'partial' ? 'partial' : 'wrong'}`;
     $('btn-next').disabled = false;
 
   } catch (e) {
-    // Fallback if cloud eval fails
+    // Fallback: just show the answer
     $('fb-tag').textContent = 'Answer';
     $('fb-body').textContent = q.answer;
     $('feedback').className = 'feedback info show';
@@ -711,27 +730,23 @@ $('btn-next').onclick = () => {
 function showResults() {
   show('screen-results');
   const correct = results.filter(r => r === 'correct').length;
-  const partial = results.filter(r => r === 'partial').length;
-  const wrong = results.filter(r => r === 'wrong').length;
-  const total = questions.length;
-  const score = Math.round(((correct + partial * 0.5) / total) * 100);
+  const partial  = results.filter(r => r === 'partial').length;
+  const wrong    = results.filter(r => r === 'wrong').length;
+  const total    = questions.length;
+  const score    = Math.round(((correct + partial * 0.5) / total) * 100);
 
   $('r-correct').textContent = correct;
   $('r-partial').textContent = partial;
-  $('r-wrong').textContent = wrong;
-  $('pct-num').textContent = score + '%';
+  $('r-wrong').textContent   = wrong;
+  $('pct-num').textContent   = score + '%';
 
-  // animate arc
-  const circumference = 339;
   setTimeout(() => {
     $('arc').style.transition = 'stroke-dashoffset 1s ease';
-    $('arc').style.strokeDashoffset = circumference - (score / 100) * circumference;
+    $('arc').style.strokeDashoffset = 339 - (score / 100) * 339;
   }, 100);
 }
 
-$('btn-retry').onclick = () => {
-  results = []; current = 0; startTest();
-};
+$('btn-retry').onclick = () => { results = []; current = 0; startTest(); };
 $('btn-new').onclick = () => {
   questions = []; results = []; current = 0; files = [];
   $('paste-area').value = '';
