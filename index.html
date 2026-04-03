@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RecallForge — Active Recall Testing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=DM+Mono&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0c0c0d;
+  --surface: #141416;
+  --surface2: #1c1c1f;
+  --surface3: #242428;
+  --border: rgba(255,255,255,0.07);
+  --border-md: rgba(255,255,255,0.13);
+  --text: #eeecea;
+  --text-muted: #7a7875;
+  --text-dim: #4a4846;
+  --accent: #c9f563;
+  --accent-dim: rgba(201,245,99,0.1);
+  --accent-ink: #192400;
+  --green: #4ade80;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --serif: 'Instrument Serif', Georgia, serif;
+  --sans: 'DM Sans', sans-serif;
+  --mono: 'DM Mono', monospace;
+  --r: 10px;
+  --r-lg: 14px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.65;
+  font-weight: 300;
+  min-height: 100vh;
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+
+/* ── NAV ── */
+nav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(12,12,13,0.8);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.25rem;
+  letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 8px;
+}
+.wordmark-pip {
+  width: 7px; height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent);
+}
+.nav-pill {
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--accent-ink); background: var(--accent);
+  padding: 4px 11px; border-radius: 20px;
+}
+
+/* ── MAIN ── */
+main {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem 5rem;
+}
+
+.screen { display: none; }
+.screen.active { display: block; }
+
+/* ── HERO ── */
+.hero { margin-bottom: 3rem; }
+.hero h1 {
+  font-family: var(--serif);
+  font-size: clamp(2rem, 6vw, 3rem);
+  font-weight: 400;
+  line-height: 1.18;
+  margin-bottom: 0.85rem;
+}
+.hero h1 em { font-style: italic; color: var(--accent); }
+.hero p { color: var(--text-muted); max-width: 440px; }
+
+/* ── ERROR ── */
+.error {
+  background: rgba(248,113,113,0.08);
+  border: 1px solid rgba(248,113,113,0.25);
+  color: var(--red);
+  border-radius: var(--r);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+  display: none;
+}
+.error.show { display: block; }
+
+/* ── UPLOAD ZONE ── */
+.drop-zone {
+  border: 1.5px dashed var(--border-md);
+  border-radius: var(--r-lg);
+  padding: 2.25rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  position: relative;
+  margin-bottom: 0.75rem;
+}
+.drop-zone input[type=file] {
+  position: absolute; inset: 0;
+  opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+.drop-zone:hover, .drop-zone.over {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.drop-icon { font-size: 1.8rem; margin-bottom: 0.6rem; display: block; }
+.drop-zone p { color: var(--text-muted); font-size: 0.9rem; }
+.drop-zone strong { color: var(--text); font-weight: 500; }
+.drop-hint { font-size: 0.78rem !important; margin-top: 3px; color: var(--text-dim) !important; }
+
+/* ── FILE LIST ── */
+.file-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 1.5rem; }
+.file-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.875rem;
+}
+.file-row .ico { font-size: 1rem; flex-shrink: 0; }
+.file-row .fname { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.file-row .fsz { color: var(--text-dim); font-size: 0.78rem; font-family: var(--mono); flex-shrink: 0; }
+.file-row .rm {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 0.85rem;
+  padding: 2px 5px; border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.file-row .rm:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+
+/* ── PASTE ── */
+.field-label {
+  display: block; font-size: 0.8rem; color: var(--text-muted);
+  letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 6px;
+}
+textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text);
+  font-family: var(--sans); font-size: 0.9rem; font-weight: 300;
+  padding: 0.85rem 1rem; resize: vertical; min-height: 90px;
+  transition: border-color 0.2s; line-height: 1.6;
+}
+textarea::placeholder { color: var(--text-dim); }
+textarea:focus { outline: none; border-color: var(--border-md); }
+
+.sep { height: 1px; background: var(--border); margin: 1.75rem 0; }
+
+/* ── PILLS ROW ── */
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; }
+.pill {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: 5px 13px;
+  font-size: 0.83rem; color: var(--text-muted);
+  cursor: pointer; transition: all 0.18s; user-select: none;
+}
+.pill.on { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.pill input { display: none; }
+
+/* ── QTY ── */
+.qty-row {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 2rem;
+}
+.qty-row .lbl { font-size: 0.85rem; color: var(--text-muted); }
+.qty-ctrl { display: flex; align-items: center; gap: 8px; }
+.qb {
+  width: 27px; height: 27px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; transition: all 0.18s;
+}
+.qb:hover { border-color: var(--border-md); background: var(--surface2); }
+#qty-val { font-family: var(--mono); font-size: 0.95rem; min-width: 22px; text-align: center; }
+
+/* ── BUTTONS ── */
+.btn-main {
+  width: 100%;
+  background: var(--accent); color: var(--accent-ink);
+  border: none; border-radius: var(--r);
+  padding: 0.9rem 2rem;
+  font-family: var(--sans); font-size: 1rem; font-weight: 500;
+  cursor: pointer; transition: opacity 0.18s, transform 0.1s;
+}
+.btn-main:hover:not(:disabled) { opacity: 0.85; }
+.btn-main:active:not(:disabled) { transform: scale(0.985); }
+.btn-main:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.btn-ghost {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); color: var(--text);
+  padding: 0.75rem 1.5rem;
+  font-family: var(--sans); font-size: 0.9rem;
+  cursor: pointer; transition: all 0.18s;
+}
+.btn-ghost:hover:not(:disabled) { border-color: var(--border-md); background: var(--surface2); }
+.btn-ghost:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── LOADING ── */
+#screen-loading {
+  text-align: center;
+  padding: 5rem 1rem;
+}
+.ring {
+  width: 44px; height: 44px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  margin: 0 auto 2rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#screen-loading h2 {
+  font-family: var(--serif); font-size: 1.6rem; font-weight: 400;
+  margin-bottom: 0.5rem;
+}
+#screen-loading p { color: var(--text-muted); font-size: 0.9rem; }
+.dots span { animation: blink 1.3s infinite; }
+.dots span:nth-child(2) { animation-delay: 0.22s; }
+.dots span:nth-child(3) { animation-delay: 0.44s; }
+@keyframes blink { 0%,80%,100%{opacity:0.15} 40%{opacity:1} }
+
+/* ── TEST SCREEN ── */
+.test-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 2.25rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.q-info { font-size: 0.82rem; color: var(--text-muted); }
+.prog-bar { width: 140px; height: 3px; background: var(--surface3); border-radius: 2px; overflow: hidden; }
+.prog-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s ease; }
+
+.q-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 1.75rem 2rem;
+  margin-bottom: 1.25rem;
+}
+.q-tag {
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 0.85rem;
+}
+.q-body {
+  font-family: var(--serif);
+  font-size: 1.25rem; font-weight: 400; line-height: 1.55;
+  color: var(--text); margin-bottom: 1.5rem;
+}
+.blank-word {
+  display: inline-block;
+  border-bottom: 2px solid var(--accent);
+  color: var(--accent);
+  min-width: 100px;
+  font-style: italic;
+}
+
+.ans-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text);
+  font-family: var(--sans); font-size: 0.9rem; font-weight: 300;
+  padding: 0.8rem 1rem; resize: none; min-height: 80px;
+  line-height: 1.6; transition: border-color 0.2s;
+}
+.ans-input:focus { outline: none; border-color: var(--accent); }
+.ans-input:disabled { opacity: 0.5; }
+
+.action-row { display: flex; gap: 9px; margin-top: 0.85rem; }
+.btn-reveal {
+  flex: 1;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--r); color: var(--text-muted);
+  padding: 0.7rem 1rem; font-family: var(--sans); font-size: 0.875rem;
+  cursor: pointer; transition: all 0.18s;
+}
+.btn-reveal:hover:not(:disabled) { border-color: var(--border-md); color: var(--text); }
+.btn-reveal:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-check {
+  flex: 2;
+  background: var(--accent); color: var(--accent-ink);
+  border: none; border-radius: var(--r);
+  padding: 0.7rem 1.25rem; font-family: var(--sans); font-size: 0.875rem; font-weight: 500;
+  cursor: pointer; transition: opacity 0.18s;
+}
+.btn-check:hover:not(:disabled) { opacity: 0.85; }
+.btn-check:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.feedback {
+  margin-top: 0.85rem;
+  border-radius: var(--r);
+  padding: 0.9rem 1.1rem;
+  font-size: 0.875rem; line-height: 1.6;
+  display: none;
+}
+.feedback.show { display: block; }
+.feedback.correct { background: rgba(74,222,128,0.07); border: 1px solid rgba(74,222,128,0.2); color: var(--green); }
+.feedback.partial { background: rgba(251,191,36,0.07); border: 1px solid rgba(251,191,36,0.2); color: var(--amber); }
+.feedback.wrong   { background: rgba(248,113,113,0.07); border: 1px solid rgba(248,113,113,0.2); color: var(--red); }
+.feedback.info    { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
+.fb-tag { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.6; margin-bottom: 3px; }
+.fb-body { color: var(--text); }
+
+.nav-row { display: flex; justify-content: flex-end; margin-top: 1.25rem; }
+.btn-next {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--r); color: var(--text);
+  padding: 0.65rem 1.5rem; font-family: var(--sans); font-size: 0.875rem;
+  cursor: pointer; transition: all 0.18s;
+  display: flex; align-items: center; gap: 6px;
+}
+.btn-next:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn-next:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* ── RESULTS ── */
+#screen-results { text-align: center; padding: 2rem 0; }
+#screen-results h2 { font-family: var(--serif); font-size: 2rem; font-weight: 400; margin-bottom: 0.4rem; }
+#screen-results .sub { color: var(--text-muted); font-size: 0.9rem; }
+
+.score-ring { width: 130px; height: 130px; margin: 2rem auto; position: relative; }
+.score-ring svg { transform: rotate(-90deg); }
+.score-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.score-num { font-family: var(--mono); font-size: 1.9rem; color: var(--accent); }
+.score-lbl { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; }
+
+.breakdown { display: flex; gap: 10px; justify-content: center; margin: 1.5rem 0 2.5rem; }
+.bd-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 0.7rem 1.1rem;
+  text-align: center; min-width: 72px;
+}
+.bd-n { font-family: var(--mono); font-size: 1.35rem; font-weight: 500; }
+.bd-l { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+.bd-card.g .bd-n { color: var(--green); }
+.bd-card.a .bd-n { color: var(--amber); }
+.bd-card.r .bd-n { color: var(--red); }
+
+.res-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+@media (max-width: 480px) {
+  nav { padding: 0 1rem; }
+  main { padding: 2rem 1rem 4rem; }
+  .q-card { padding: 1.25rem; }
+  .action-row { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wordmark">
+    <div class="wordmark-pip"></div>
+    RecallForge
+  </div>
+  <span class="nav-pill">llama3.2</span>
+</nav>
+
+<main>
+
+  <!-- ── UPLOAD SCREEN ── -->
+  <section class="screen active" id="screen-upload">
+    <div class="hero">
+      <h1>Turn your notes into<br><em>active recall</em> tests.</h1>
+      <p>Upload study materials and get AI-generated questions that strengthen memory retrieval — powered by your local Llama 3.2.</p>
+    </div>
+
+    <div class="error" id="err-box"></div>
+
+    <div class="drop-zone" id="drop-zone">
+      <input type="file" id="file-input" accept=".txt,.md,.csv" multiple>
+      <span class="drop-icon">📎</span>
+      <p><strong>Drop files here</strong> or click to browse</p>
+      <p class="drop-hint">TXT, MD files — up to 5 files &nbsp;·&nbsp; PDF text must be copy-pasted below</p>
+    </div>
+
+    <div class="file-list" id="file-list"></div>
+
+    <label class="field-label" for="paste-area">Paste notes or study text</label>
+    <textarea id="paste-area" placeholder="Paste any notes, definitions, paragraphs, or copied PDF text here…" rows="5"></textarea>
+
+    <div class="sep"></div>
+
+    <label class="field-label">Question types</label>
+    <div class="pills" id="pill-row">
+      <label class="pill on"><input type="checkbox" value="fill" checked> Fill in the blank</label>
+      <label class="pill on"><input type="checkbox" value="short" checked> Short answer</label>
+      <label class="pill"><input type="checkbox" value="concept"> Concept check</label>
+      <label class="pill"><input type="checkbox" value="truefalse"> True / False</label>
+    </div>
+
+    <div class="qty-row">
+      <span class="lbl">Number of questions</span>
+      <div class="qty-ctrl">
+        <button class="qb" id="qty-dn">−</button>
+        <span id="qty-val">8</span>
+        <button class="qb" id="qty-up">+</button>
+      </div>
+    </div>
+
+    <button class="btn-main" id="btn-gen">Generate Recall Test →</button>
+  </section>
+
+  <!-- ── LOADING SCREEN ── -->
+  <section class="screen" id="screen-loading">
+    <div class="ring"></div>
+    <h2>Building your test<span class="dots"><span>.</span><span>.</span><span>.</span></span></h2>
+    <p>Llama 3.2 is reading your material and crafting recall questions.</p>
+    <p style="margin-top:0.5rem; font-size:0.8rem; color:var(--text-dim)">This may take 15–30 seconds depending on content length.</p>
+  </section>
+
+  <!-- ── TEST SCREEN ── -->
+  <section class="screen" id="screen-test">
+    <div class="test-top">
+      <span class="q-info" id="q-counter">Question 1 of 8</span>
+      <div class="prog-bar"><div class="prog-fill" id="prog-fill" style="width:12%"></div></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-tag" id="q-tag">Fill in the blank</div>
+      <div class="q-body" id="q-body">Loading…</div>
+      <textarea class="ans-input" id="ans-input" placeholder="Write your answer here…" rows="3"></textarea>
+      <div class="action-row">
+        <button class="btn-reveal" id="btn-reveal">Show answer</button>
+        <button class="btn-check" id="btn-check">Check with AI ✦</button>
+      </div>
+      <div class="feedback" id="feedback">
+        <div class="fb-tag" id="fb-tag">Answer</div>
+        <div class="fb-body" id="fb-body"></div>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn-next" id="btn-next" disabled>Next →</button>
+    </div>
+  </section>
+
+  <!-- ── RESULTS SCREEN ── -->
+  <section class="screen" id="screen-results">
+    <h2>Session complete.</h2>
+    <p class="sub">Here's how you performed</p>
+
+    <div class="score-ring">
+      <svg width="130" height="130" viewBox="0 0 130 130">
+        <circle cx="65" cy="65" r="54" fill="none" stroke="var(--surface3)" stroke-width="9"/>
+        <circle cx="65" cy="65" r="54" fill="none" stroke="var(--accent)" stroke-width="9"
+          stroke-linecap="round" stroke-dasharray="339" id="arc" stroke-dashoffset="339"/>
+      </svg>
+      <div class="score-center">
+        <span class="score-num" id="pct-num">0%</span>
+        <span class="score-lbl">score</span>
+      </div>
+    </div>
+
+    <div class="breakdown">
+      <div class="bd-card g"><div class="bd-n" id="r-correct">0</div><div class="bd-l">Correct</div></div>
+      <div class="bd-card a"><div class="bd-n" id="r-partial">0</div><div class="bd-l">Partial</div></div>
+      <div class="bd-card r"><div class="bd-n" id="r-wrong">0</div><div class="bd-l">Missed</div></div>
+    </div>
+
+    <div class="res-btns">
+      <button class="btn-ghost" id="btn-retry">Retry same test</button>
+      <button class="btn-ghost" id="btn-new">New test</button>
+    </div>
+  </section>
+
+</main>
+
+<script>
+const OLLAMA_URL = 'http://localhost:11434/api/generate';
+const MODEL = 'llama3.2';
+
+// ── helpers ──
+const $ = id => document.getElementById(id);
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  $(id).classList.add('active');
+}
+function showErr(msg) {
+  const b = $('err-box');
+  b.textContent = msg; b.classList.add('show');
+  setTimeout(() => b.classList.remove('show'), 6000);
+}
+
+// ── state ──
+let files = [];
+let questions = [];
+let current = 0;
+let results = []; // 'correct' | 'partial' | 'wrong'
+let qty = 8;
+
+// ── qty ──
+$('qty-dn').onclick = () => { if (qty > 3) { qty--; $('qty-val').textContent = qty; } };
+$('qty-up').onclick = () => { if (qty < 20) { qty++; $('qty-val').textContent = qty; } };
+
+// ── pills ──
+document.querySelectorAll('.pill').forEach(p => {
+  p.onclick = () => p.classList.toggle('on');
+});
+
+// ── drop zone ──
+const dz = $('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); addFiles(Array.from(e.dataTransfer.files)); });
+$('file-input').onchange = e => addFiles(Array.from(e.target.files));
+
+function addFiles(list) {
+  for (const f of list) {
+    if (files.length >= 5) break;
+    if (!files.find(x => x.name === f.name)) files.push(f);
+  }
+  renderFiles();
+}
+function renderFiles() {
+  $('file-list').innerHTML = files.map((f, i) => `
+    <div class="file-row">
+      <span class="ico">📝</span>
+      <span class="fname">${f.name}</span>
+      <span class="fsz">${(f.size/1024).toFixed(0)} KB</span>
+      <button class="rm" data-i="${i}">✕</button>
+    </div>`).join('');
+  $('file-list').querySelectorAll('.rm').forEach(b =>
+    b.onclick = () => { files.splice(+b.dataset.i, 1); renderFiles(); });
+}
+
+function readText(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result);
+    r.onerror = rej;
+    r.readAsText(file);
+  });
+}
+
+// ── GENERATE ──
+$('btn-gen').onclick = async () => {
+  const pasted = $('paste-area').value.trim();
+  if (!files.length && !pasted) { showErr('Please upload a file or paste some text first.'); return; }
+
+  const types = Array.from(document.querySelectorAll('.pill.on input')).map(x => x.value);
+  if (!types.length) { showErr('Select at least one question type.'); return; }
+
+  show('screen-loading');
+
+  try {
+    let content = pasted ? pasted + '\n\n' : '';
+    for (const f of files) content += `--- ${f.name} ---\n${await readText(f)}\n\n`;
+
+    const typeLabels = {
+      fill: 'fill-in-the-blank (use ___ for the blank)',
+      short: 'short-answer',
+      concept: 'concept-check (ask for a definition or explanation)',
+      truefalse: 'true-or-false'
+    };
+    const typeStr = types.map(t => typeLabels[t]).join(', ');
+
+    // Trim content to avoid huge prompts
+    const trimmed = content.length > 6000 ? content.slice(0, 6000) + '\n[...content trimmed...]' : content;
+
+    const prompt = `You are an active recall coach. Read the study material below and generate exactly ${qty} questions.
+
+Rules:
+- Question types to use: ${typeStr}
+- Each question must test genuine understanding, not just memory of a phrase
+- For fill-in-the-blank: use ___ where the key term goes
+- Keep questions clear and specific
+- Output ONLY valid JSON — no explanation, no markdown, no code fences
+
+JSON format:
+[
+  {
+    "type": "fill|short|concept|truefalse",
+    "question": "question text",
+    "answer": "correct answer"
+  }
+]
+
+Study material:
+${trimmed}`;
+
+    const resp = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: MODEL, prompt, stream: false })
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`Ollama error ${resp.status}: ${txt}`);
+    }
+
+    const data = await resp.json();
+    const raw = data.response || '';
+
+    // Extract JSON array from response
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('Model did not return valid JSON. Try again or reduce content length.');
+
+    questions = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(questions) || questions.length === 0) throw new Error('No questions were generated. Try with more content.');
+
+    results = [];
+    current = 0;
+    startTest();
+
+  } catch (e) {
+    show('screen-upload');
+    let msg = e.message;
+    if (msg.includes('fetch') || msg.includes('NetworkError') || msg.includes('Failed to fetch')) {
+      msg = 'Cannot reach Ollama. Make sure it is running — open a terminal and type: ollama serve';
+    }
+    showErr(msg);
+  }
+};
+
+// ── TEST ──
+const typeNames = { fill: 'Fill in the blank', short: 'Short answer', concept: 'Concept check', truefalse: 'True / False' };
+
+function startTest() {
+  show('screen-test');
+  loadQuestion();
+}
+
+function loadQuestion() {
+  const q = questions[current];
+  const total = questions.length;
+
+  $('q-counter').textContent = `Question ${current + 1} of ${total}`;
+  $('prog-fill').style.width = `${((current + 1) / total) * 100}%`;
+  $('q-tag').textContent = typeNames[q.type] || q.type;
+  $('q-body').textContent = q.question;
+  $('ans-input').value = '';
+  $('ans-input').disabled = false;
+  $('btn-reveal').disabled = false;
+  $('btn-check').disabled = false;
+
+  const fb = $('feedback');
+  fb.className = 'feedback';
+  $('fb-body').textContent = '';
+
+  $('btn-next').disabled = true;
+}
+
+$('btn-reveal').onclick = () => {
+  const q = questions[current];
+  const fb = $('feedback');
+  $('fb-tag').textContent = 'Answer';
+  $('fb-body').textContent = q.answer;
+  fb.className = 'feedback info show';
+  $('ans-input').disabled = true;
+  $('btn-reveal').disabled = true;
+  $('btn-check').disabled = true;
+  $('btn-next').disabled = false;
+  if (!results[current]) results[current] = 'wrong';
+};
+
+$('btn-check').onclick = async () => {
+  const q = questions[current];
+  const userAns = $('ans-input').value.trim();
+  if (!userAns) { return; }
+
+  $('btn-check').disabled = true;
+  $('btn-reveal').disabled = true;
+  $('ans-input').disabled = true;
+  $('btn-check').textContent = 'Checking…';
+
+  try {
+    const checkPrompt = `You are grading a student's answer for an active recall test.
+
+Question: ${q.question}
+Correct answer: ${q.answer}
+Student's answer: ${userAns}
+
+Grade the answer as one of: correct, partial, wrong
+- correct: the student's answer captures the key idea accurately
+- partial: the student has some of it right but is missing key parts
+- wrong: the answer is incorrect or off-topic
+
+Respond ONLY with this JSON (no explanation, no markdown):
+{"grade": "correct|partial|wrong", "feedback": "one short sentence explaining why"}`;
+
+    const resp = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: MODEL, prompt: checkPrompt, stream: false })
+    });
+
+    const data = await resp.json();
+    const raw = data.response || '';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+
+    let grade = 'wrong', feedbackText = 'Could not evaluate.';
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      grade = parsed.grade || 'wrong';
+      feedbackText = parsed.feedback || '';
+    }
+
+    results[current] = grade;
+
+    const fb = $('feedback');
+    $('fb-tag').textContent = grade === 'correct' ? '✓ Correct' : grade === 'partial' ? '~ Partial' : '✗ Incorrect';
+    $('fb-body').textContent = feedbackText + '\n\nModel answer: ' + q.answer;
+    fb.className = `feedback show ${grade === 'correct' ? 'correct' : grade === 'partial' ? 'partial' : 'wrong'}`;
+    $('btn-next').disabled = false;
+
+  } catch (e) {
+    $('fb-tag').textContent = 'Answer';
+    $('fb-body').textContent = q.answer;
+    $('feedback').className = 'feedback info show';
+    results[current] = 'wrong';
+    $('btn-next').disabled = false;
+  }
+
+  $('btn-check').textContent = 'Check with AI ✦';
+};
+
+$('btn-next').onclick = () => {
+  current++;
+  if (current >= questions.length) showResults();
+  else loadQuestion();
+};
+
+// ── RESULTS ──
+function showResults() {
+  show('screen-results');
+  const correct = results.filter(r => r === 'correct').length;
+  const partial = results.filter(r => r === 'partial').length;
+  const wrong = results.filter(r => r === 'wrong').length;
+  const total = questions.length;
+  const score = Math.round(((correct + partial * 0.5) / total) * 100);
+
+  $('r-correct').textContent = correct;
+  $('r-partial').textContent = partial;
+  $('r-wrong').textContent = wrong;
+  $('pct-num').textContent = score + '%';
+
+  // animate arc
+  const circumference = 339;
+  setTimeout(() => {
+    $('arc').style.transition = 'stroke-dashoffset 1s ease';
+    $('arc').style.strokeDashoffset = circumference - (score / 100) * circumference;
+  }, 100);
+}
+
+$('btn-retry').onclick = () => {
+  results = []; current = 0; startTest();
+};
+$('btn-new').onclick = () => {
+  questions = []; results = []; current = 0; files = [];
+  $('paste-area').value = '';
+  renderFiles();
+  show('screen-upload');
+};
+</script>
+</body>
+</html>
