@@ -110,9 +110,10 @@ def evaluate_answer():
     response = model.generate_content(prompt)
     clean_json = response.text.replace('```json', '').replace('```', '').strip()
     return jsonify({"evaluation": clean_json})
-    @app.route('/api/health', methods=['GET'])
+    
+@app.route('/api/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok"})
+return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
     # Cloud servers assign their own ports, so we have to bind to 0.0.0.0
