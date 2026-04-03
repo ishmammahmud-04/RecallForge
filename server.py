@@ -34,24 +34,39 @@ def upload_files():
             if file.filename.endswith('.pdf'):
                 pdf_bytes = file.read()
                 reader = PdfReader(io.BytesIO(pdf_bytes))
-                for page in reader.pages:
+                total_pages = len(reader.pages)
+                print(f"PDF has {total_pages} pages")
+
+                if total_pages <= 80:
+                    # Small enough — read everything
+                    pages_to_read = list(range(total_pages))
+                else:
+                    # Large PDF — sample 80 pages spread across the whole doc
+                    import math
+                    step = total_pages / 80
+                    pages_to_read = [int(i * step) for i in range(80)]
+
+                for i in pages_to_read:
                     try:
-                        extracted = page.extract_text()
+                        extracted = reader.pages[i].extract_text()
                         if extracted:
                             full_text += extracted + "\n"
                     except Exception:
                         continue
+
+                print(f"Read {len(pages_to_read)} pages out of {total_pages}")
+
             elif file.filename.endswith(('.txt', '.md')):
                 full_text += file.read().decode('utf-8') + "\n"
+
         except Exception as e:
             print(f"Error reading {file.filename}: {e}")
             continue
 
-    # Trim to ~12000 chars to stay within safe prompt limits
-    study_text = full_text.strip()[:12000]
+    study_text = full_text.strip()[:40000]
 
     char_count = len(study_text)
-    print(f"Stored {char_count} characters of study text")
+    print(f"Stored {char_count} characters")
 
     if char_count < 20:
         return jsonify({"error": "No readable text found in uploaded files."}), 400
