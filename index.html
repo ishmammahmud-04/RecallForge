@@ -521,13 +521,19 @@ let qty = 8;
 
 // ── qty ──
 $('qty-dn').onclick = () => { if (qty > 3) { qty--; $('qty-val').textContent = qty; } };
-$('qty-up').onclick = () => { if (qty < 20) { qty++; $('qty-val').textContent = qty; } };
+$('qty-up').onclick = () => { if (qty < 50) { qty++; $('qty-val').textContent = qty; } };
 
 // ── pills ──
+// Fix pill selection — attach to label not the pill div
 document.querySelectorAll('.pill').forEach(p => {
-  p.onclick = () => p.classList.toggle('on');
+    p.addEventListener('click', function(e) {
+        // Don't double-fire from the hidden checkbox
+        if (e.target.tagName === 'INPUT') return;
+        this.classList.toggle('on');
+        const cb = this.querySelector('input');
+        if (cb) cb.checked = !cb.checked;
+    });
 });
-
 // ── drop zone ──
 const dz = $('drop-zone');
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
