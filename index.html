@@ -389,31 +389,30 @@ textarea:focus { outline: none; border-color: var(--border-md); }
     <div class="wordmark-pip"></div>
     RecallForge
   </div>
-  <span class="nav-pill">llama3.2</span>
+  <span class="nav-pill">Gemini Cloud</span>
 </nav>
 
 <main>
 
-  <!-- ── UPLOAD SCREEN ── -->
   <section class="screen active" id="screen-upload">
     <div class="hero">
       <h1>Turn your notes into<br><em>active recall</em> tests.</h1>
-      <p>Upload study materials and get AI-generated questions that strengthen memory retrieval — powered by your local Llama 3.2.</p>
+      <p>Upload study materials and get AI-generated questions that strengthen memory retrieval — powered by Cloud AI & RAG.</p>
     </div>
 
     <div class="error" id="err-box"></div>
 
     <div class="drop-zone" id="drop-zone">
-      <input type="file" id="file-input" accept=".txt,.md,.csv" multiple>
+      <input type="file" id="file-input" accept=".txt,.md,.pdf" multiple>
       <span class="drop-icon">📎</span>
       <p><strong>Drop files here</strong> or click to browse</p>
-      <p class="drop-hint">TXT, MD files — up to 5 files &nbsp;·&nbsp; PDF text must be copy-pasted below</p>
+      <p class="drop-hint">TXT, MD, PDF files — up to 5 files</p>
     </div>
 
     <div class="file-list" id="file-list"></div>
 
     <label class="field-label" for="paste-area">Paste notes or study text</label>
-    <textarea id="paste-area" placeholder="Paste any notes, definitions, paragraphs, or copied PDF text here…" rows="5"></textarea>
+    <textarea id="paste-area" placeholder="Paste any notes, definitions, paragraphs here…" rows="5"></textarea>
 
     <div class="sep"></div>
 
@@ -437,15 +436,13 @@ textarea:focus { outline: none; border-color: var(--border-md); }
     <button class="btn-main" id="btn-gen">Generate Recall Test →</button>
   </section>
 
-  <!-- ── LOADING SCREEN ── -->
   <section class="screen" id="screen-loading">
     <div class="ring"></div>
     <h2>Building your test<span class="dots"><span>.</span><span>.</span><span>.</span></span></h2>
-    <p>Llama 3.2 is reading your material and crafting recall questions.</p>
-    <p style="margin-top:0.5rem; font-size:0.8rem; color:var(--text-dim)">This may take 15–30 seconds depending on content length.</p>
+    <p id="loading-msg">Uploading files and analyzing context...</p>
+    <p style="margin-top:0.5rem; font-size:0.8rem; color:var(--text-dim)">This may take 15–30 seconds if the free server is waking up.</p>
   </section>
 
-  <!-- ── TEST SCREEN ── -->
   <section class="screen" id="screen-test">
     <div class="test-top">
       <span class="q-info" id="q-counter">Question 1 of 8</span>
@@ -471,7 +468,6 @@ textarea:focus { outline: none; border-color: var(--border-md); }
     </div>
   </section>
 
-  <!-- ── RESULTS SCREEN ── -->
   <section class="screen" id="screen-results">
     <h2>Session complete.</h2>
     <p class="sub">Here's how you performed</p>
@@ -503,8 +499,8 @@ textarea:focus { outline: none; border-color: var(--border-md); }
 </main>
 
 <script>
-const OLLAMA_URL = 'http://localhost:11434/api/generate';
-const MODEL = 'llama3.2';
+// Pointing to your live Render backend
+const API_URL = 'https://recallforge-ulmy.onrender.com/api';
 
 // ── helpers ──
 const $ = id => document.getElementById(id);
@@ -560,81 +556,49 @@ function renderFiles() {
     b.onclick = () => { files.splice(+b.dataset.i, 1); renderFiles(); });
 }
 
-function readText(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = e => res(e.target.result);
-    r.onerror = rej;
-    r.readAsText(file);
-  });
-}
-
-// ── GENERATE ──
+// ── GENERATE via Cloud ──
 $('btn-gen').onclick = async () => {
   const pasted = $('paste-area').value.trim();
   if (!files.length && !pasted) { showErr('Please upload a file or paste some text first.'); return; }
 
-  const types = Array.from(document.querySelectorAll('.pill.on input')).map(x => x.value);
-  if (!types.length) { showErr('Select at least one question type.'); return; }
+  const types = Array.from(document.querySelectorAll('.pill.on input')).map(x => x.value).join(', ');
+  if (!types) { showErr('Select at least one question type.'); return; }
 
   show('screen-loading');
+  $('loading-msg').textContent = 'Uploading files and building Vector database...';
 
   try {
-    let content = pasted ? pasted + '\n\n' : '';
-    for (const f of files) content += `--- ${f.name} ---\n${await readText(f)}\n\n`;
+    // 1. Upload files and text to Python backend
+    const formData = new FormData();
+    formData.append('pasted_text', pasted);
+    files.forEach(f => formData.append('files', f));
 
-    const typeLabels = {
-      fill: 'fill-in-the-blank (use ___ for the blank)',
-      short: 'short-answer',
-      concept: 'concept-check (ask for a definition or explanation)',
-      truefalse: 'true-or-false'
-    };
-    const typeStr = types.map(t => typeLabels[t]).join(', ');
-
-    // Trim content to avoid huge prompts
-    const trimmed = content.length > 6000 ? content.slice(0, 6000) + '\n[...content trimmed...]' : content;
-
-    const prompt = `You are an active recall coach. Read the study material below and generate exactly ${qty} questions.
-
-Rules:
-- Question types to use: ${typeStr}
-- Each question must test genuine understanding, not just memory of a phrase
-- For fill-in-the-blank: use ___ where the key term goes
-- Keep questions clear and specific
-- Output ONLY valid JSON — no explanation, no markdown, no code fences
-
-JSON format:
-[
-  {
-    "type": "fill|short|concept|truefalse",
-    "question": "question text",
-    "answer": "correct answer"
-  }
-]
-
-Study material:
-${trimmed}`;
-
-    const resp = await fetch(OLLAMA_URL, {
+    const uploadRes = await fetch(`${API_URL}/upload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, prompt, stream: false })
+      body: formData
     });
 
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`Ollama error ${resp.status}: ${txt}`);
+    if (!uploadRes.ok) throw new Error('Failed to upload data. Server might be sleeping.');
+
+    // 2. Request question generation
+    $('loading-msg').textContent = 'Gemini is crafting recall questions...';
+    
+    const genRes = await fetch(`${API_URL}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qty: qty, types: types })
+    });
+
+    if (!genRes.ok) throw new Error('Failed to generate questions.');
+
+    const data = await genRes.json();
+    
+    // Parse the JSON string returned by the backend
+    questions = JSON.parse(data.questions);
+    
+    if (!Array.isArray(questions) || questions.length === 0) {
+      throw new Error('No questions generated.');
     }
-
-    const data = await resp.json();
-    const raw = data.response || '';
-
-    // Extract JSON array from response
-    const jsonMatch = raw.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error('Model did not return valid JSON. Try again or reduce content length.');
-
-    questions = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(questions) || questions.length === 0) throw new Error('No questions were generated. Try with more content.');
 
     results = [];
     current = 0;
@@ -642,11 +606,7 @@ ${trimmed}`;
 
   } catch (e) {
     show('screen-upload');
-    let msg = e.message;
-    if (msg.includes('fetch') || msg.includes('NetworkError') || msg.includes('Failed to fetch')) {
-      msg = 'Cannot reach Ollama. Make sure it is running — open a terminal and type: ollama serve';
-    }
-    showErr(msg);
+    showErr(e.message || 'Server error. If using free tier, try again in 10 seconds.');
   }
 };
 
@@ -664,7 +624,7 @@ function loadQuestion() {
 
   $('q-counter').textContent = `Question ${current + 1} of ${total}`;
   $('prog-fill').style.width = `${((current + 1) / total) * 100}%`;
-  $('q-tag').textContent = typeNames[q.type] || q.type;
+  $('q-tag').textContent = typeNames[q.type] || q.type || 'Question';
   $('q-body').textContent = q.question;
   $('ans-input').value = '';
   $('ans-input').disabled = false;
@@ -691,6 +651,7 @@ $('btn-reveal').onclick = () => {
   if (!results[current]) results[current] = 'wrong';
 };
 
+// ── EVALUATE via Cloud ──
 $('btn-check').onclick = async () => {
   const q = questions[current];
   const userAns = $('ans-input').value.trim();
@@ -702,36 +663,23 @@ $('btn-check').onclick = async () => {
   $('btn-check').textContent = 'Checking…';
 
   try {
-    const checkPrompt = `You are grading a student's answer for an active recall test.
-
-Question: ${q.question}
-Correct answer: ${q.answer}
-Student's answer: ${userAns}
-
-Grade the answer as one of: correct, partial, wrong
-- correct: the student's answer captures the key idea accurately
-- partial: the student has some of it right but is missing key parts
-- wrong: the answer is incorrect or off-topic
-
-Respond ONLY with this JSON (no explanation, no markdown):
-{"grade": "correct|partial|wrong", "feedback": "one short sentence explaining why"}`;
-
-    const resp = await fetch(OLLAMA_URL, {
+    const evalRes = await fetch(`${API_URL}/evaluate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, prompt: checkPrompt, stream: false })
+      body: JSON.stringify({
+        question: q.question,
+        correct_answer: q.answer,
+        user_answer: userAns
+      })
     });
 
-    const data = await resp.json();
-    const raw = data.response || '';
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!evalRes.ok) throw new Error('Evaluation failed');
+    
+    const data = await evalRes.json();
+    const parsedEval = JSON.parse(data.evaluation);
 
-    let grade = 'wrong', feedbackText = 'Could not evaluate.';
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      grade = parsed.grade || 'wrong';
-      feedbackText = parsed.feedback || '';
-    }
+    let grade = parsedEval.grade || 'wrong';
+    let feedbackText = parsedEval.feedback || '';
 
     results[current] = grade;
 
@@ -742,6 +690,7 @@ Respond ONLY with this JSON (no explanation, no markdown):
     $('btn-next').disabled = false;
 
   } catch (e) {
+    // Fallback if cloud eval fails
     $('fb-tag').textContent = 'Answer';
     $('fb-body').textContent = q.answer;
     $('feedback').className = 'feedback info show';
