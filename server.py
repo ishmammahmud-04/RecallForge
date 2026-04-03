@@ -62,7 +62,7 @@ def generate_questions():
     Base them ONLY on this text: {study_text}
     
     Output ONLY a raw JSON array. No markdown, no triple backticks.
-    Format: [{"type": "...", "question": "...", "answer": "..."}]"""
+    Format: [{{"type": "...", "question": "...", "answer": "..."}}]"""
 
     try:
         response = model.generate_content(prompt)
