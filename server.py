@@ -1,11 +1,9 @@
 import os
-import json
-import chromadb
+import io
 import google.generativeai as genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pypdf import PdfReader
-import io
 
 app = Flask(__name__)
 CORS(app)
@@ -14,12 +12,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-chroma_client = chromadb.Client()
-try:
-    chroma_client.delete_collection("study_notes")
-except:
-    pass
-collection = chroma_client.create_collection(name="study_notes")
+# Simple in-memory store — no ChromaDB needed
+study_text = ""
 
 
 @app.route('/api/health', methods=['GET'])
@@ -29,6 +23,7 @@ def health():
 
 @app.route('/api/upload', methods=['POST'])
 def upload_files():
+    global study_text
     files = request.files.getlist('files')
     pasted_text = request.form.get('pasted_text', '')
 
@@ -37,7 +32,6 @@ def upload_files():
     for file in files:
         try:
             if file.filename.endswith('.pdf'):
-                # Read entire file into memory first to avoid stream timeout
                 pdf_bytes = file.read()
                 reader = PdfReader(io.BytesIO(pdf_bytes))
                 for page in reader.pages:
@@ -46,69 +40,52 @@ def upload_files():
                         if extracted:
                             full_text += extracted + "\n"
                     except Exception:
-                        continue  # skip broken pages, don't crash
+                        continue
             elif file.filename.endswith(('.txt', '.md')):
                 full_text += file.read().decode('utf-8') + "\n"
         except Exception as e:
-            print(f"Error reading file {file.filename}: {e}")
+            print(f"Error reading {file.filename}: {e}")
             continue
 
-    # Reset and rebuild the collection each upload
-    global collection
-    try:
-        chroma_client.delete_collection("study_notes")
-    except:
-        pass
-    collection = chroma_client.create_collection(name="study_notes")
+    # Trim to ~12000 chars to stay within safe prompt limits
+    study_text = full_text.strip()[:12000]
 
-    chunk_size = 1000
-    chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+    char_count = len(study_text)
+    print(f"Stored {char_count} characters of study text")
 
-    added = 0
-    for i, chunk in enumerate(chunks):
-        if len(chunk.strip()) > 10:
-            try:
-                embedding = genai.embed_content(
-                    model="models/embedding-001",  # fixed model name
-                    content=chunk,
-                    task_type="retrieval_document"
-                )['embedding']
+    if char_count < 20:
+        return jsonify({"error": "No readable text found in uploaded files."}), 400
 
-                collection.add(
-                    ids=[f"chunk_{i}"],
-                    embeddings=[embedding],
-                    documents=[chunk]
-                )
-                added += 1
-            except Exception as e:
-                print(f"Embedding error on chunk {i}: {e}")
-                continue
-
-    return jsonify({"message": f"Successfully processed {added} chunks!"})
+    return jsonify({"message": f"Successfully stored {char_count} characters!"})
 
 
 @app.route('/api/generate', methods=['POST'])
 def generate_questions():
+    global study_text
+
+    if not study_text or len(study_text.strip()) < 20:
+        return jsonify({"error": "No study material found. Please upload files first."}), 400
+
     data = request.json
     qty = data.get('qty', 5)
     q_types = data.get('types', 'short answer')
 
-    results = collection.get(limit=5)
-    context_text = "\n".join(results['documents']) if results['documents'] else "No context found."
-
-    prompt = f"""
-You are an expert active recall coach.
+    prompt = f"""You are an expert study and active recall coach,mentor and guide.
 Using ONLY the study material below, generate exactly {qty} questions of these types: {q_types}.
 
-Format the output strictly as a JSON array like this:
+Rules:
+- Base every question strictly on the provided material
+- For fill-in-the-blank, use ___ where the key term goes
+- Keep questions specific and meaningful
+- Output ONLY a raw JSON array, no markdown, no backticks, no explanation
+
+JSON format:
 [
   {{"type": "short", "question": "What is...?", "answer": "The answer is..."}}
 ]
-Do not output any markdown formatting, code blocks, or backticks. Just the raw JSON array.
 
 Study Material:
-{context_text}
-"""
+{study_text}"""
 
     try:
         response = model.generate_content(prompt)
@@ -125,15 +102,13 @@ def evaluate_answer():
     correct_answer = data['correct_answer']
     user_answer = data['user_answer']
 
-    prompt = f"""
-Grade this student's answer.
+    prompt = f"""Grade this student's answer.
 Question: {question}
 Correct Answer: {correct_answer}
 Student Answer: {user_answer}
 
-Respond ONLY with a JSON object: {{"grade": "correct" or "partial" or "wrong", "feedback": "one short sentence explaining why"}}
-Do not use markdown.
-"""
+Respond ONLY with this JSON object, no markdown:
+{{"grade": "correct" or "partial" or "wrong", "feedback": "one short sentence explaining why"}}"""
 
     try:
         response = model.generate_content(prompt)
