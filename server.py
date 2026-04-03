@@ -1,72 +1,117 @@
-"""
-RecallForge — local dev server
-Serves the app AND proxies Ollama requests to avoid browser CORS issues.
-
-Run:  python server.py
-Then open:  http://localhost:8080
-"""
-
-import http.server
-import urllib.request
-import urllib.error
-import json
+# server.py
 import os
+import json
+import chromadb
+import google.generativeai as genai
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from pypdf import PdfReader
 
-PORT = 8080
-OLLAMA = "http://localhost:11434"
+app = Flask(__name__)
+CORS(app)
 
-class Handler(http.server.SimpleHTTPRequestHandler):
+# 🔑 PASTE YOUR GEMINI API KEY HERE
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-2.5-flash')
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self._cors()
-        self.end_headers()
+# Setup ChromaDB in memory (Perfect for ephemeral cloud servers)
+chroma_client = chromadb.Client()
+try:
+    chroma_client.delete_collection("study_notes")
+except:
+    pass
+collection = chroma_client.create_collection(name="study_notes")
 
-    def do_POST(self):
-        if self.path.startswith("/api/"):
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length)
-            try:
-                req = urllib.request.Request(
-                    OLLAMA + self.path,
-                    data=body,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=120) as resp:
-                    data = resp.read()
-                self.send_response(200)
-                self._cors()
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(data)
-            except urllib.error.URLError as e:
-                self.send_response(502)
-                self._cors()
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
-        else:
-            self.send_response(404)
-            self.end_headers()
+@app.route('/api/upload', methods=['POST'])
+def upload_files():
+    files = request.files.getlist('files')
+    pasted_text = request.form.get('pasted_text', '')
+    
+    full_text = pasted_text + "\n"
+    
+    for file in files:
+        if file.filename.endswith('.pdf'):
+            reader = PdfReader(file)
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    full_text += extracted + "\n"
+        elif file.filename.endswith(('.txt', '.md')):
+            full_text += file.read().decode('utf-8') + "\n"
 
-    def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+    chunk_size = 1000
+    chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+    
+    for i, chunk in enumerate(chunks):
+        if len(chunk.strip()) > 10:
+            # Use Gemini's text embedding model for the RAG database
+            embedding = genai.embed_content(
+                model="models/text-embedding-004",
+                content=chunk,
+                task_type="retrieval_document"
+            )['embedding']
+            
+            collection.add(
+                ids=[f"chunk_{i}"],
+                embeddings=[embedding],
+                documents=[chunk]
+            )
 
-    def log_message(self, fmt, *args):
-        print(f"  {self.address_string()} -> {fmt % args}")
+    return jsonify({"message": f"Successfully processed {len(chunks)} chunks!"})
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+@app.route('/api/generate', methods=['POST'])
+def generate_questions():
+    data = request.json
+    qty = data.get('qty', 5)
+    q_types = data.get('types', 'short answer')
+    
+    results = collection.get(limit=5)
+    context_text = "\n".join(results['documents']) if results['documents'] else "No context found."
 
-print("""
-RecallForge local server
-  App:    http://localhost:{}
-  Ollama: proxied from port 11434
+    prompt = f"""
+    You are an expert active recall coach. 
+    Using ONLY the study material below, generate exactly {qty} questions of these types: {q_types}.
+    
+    Format the output strictly as a JSON array like this:
+    [
+      {{"type": "short", "question": "What is...?", "answer": "The answer is..."}}
+    ]
+    Do not output any markdown formatting, code blocks, or backticks. Just the raw JSON array.
+    
+    Study Material:
+    {context_text}
+    """
 
-Press Ctrl+C to stop.
-""".format(PORT))
+    try:
+        response = model.generate_content(prompt)
+        clean_json = response.text.replace('```json', '').replace('```', '').strip()
+        return jsonify({"questions": clean_json})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-with http.server.HTTPServer(("", PORT), Handler) as httpd:
-    httpd.serve_forever()
+@app.route('/api/evaluate', methods=['POST'])
+def evaluate_answer():
+    data = request.json
+    question = data['question']
+    correct_answer = data['correct_answer']
+    user_answer = data['user_answer']
+
+    prompt = f"""
+    Grade this student's answer.
+    Question: {question}
+    Correct Answer: {correct_answer}
+    Student Answer: {user_answer}
+    
+    Respond ONLY with a JSON object: {{"grade": "correct" or "partial" or "wrong", "feedback": "one short sentence explaining why"}}
+    Do not use markdown.
+    """
+    
+    response = model.generate_content(prompt)
+    clean_json = response.text.replace('```json', '').replace('```', '').strip()
+    return jsonify({"evaluation": clean_json})
+
+if __name__ == '__main__':
+    # Cloud servers assign their own ports, so we have to bind to 0.0.0.0
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
