@@ -70,7 +70,7 @@ def generate_questions():
     context_text = "\n".join(results['documents']) if results['documents'] else "No context found."
 
     prompt = f"""
-    You are an expert active recall coach. 
+    You are an expert study coach and guide and mentor. 
     Using ONLY the study material below, generate exactly {qty} questions of these types: {q_types}.
     
     Format the output strictly as a JSON array like this:
@@ -110,6 +110,9 @@ def evaluate_answer():
     response = model.generate_content(prompt)
     clean_json = response.text.replace('```json', '').replace('```', '').strip()
     return jsonify({"evaluation": clean_json})
+    @app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
     # Cloud servers assign their own ports, so we have to bind to 0.0.0.0
