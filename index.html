@@ -596,7 +596,13 @@ $('btn-gen').onclick = async () => {
     files.forEach(f => formData.append('files', f));
 
     const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
-    if (!uploadRes.ok) throw new Error('Upload failed. Please try again.');
+    if (!uploadRes.ok) {
+      const errData = await uploadRes.json().catch(() => ({}));
+      if (errData.error === 'image_pdf') {
+        throw new Error('This PDF appears to be image-based (scanned pages). RecallForge can only read text-based PDFs. Please try: 1) Copy-paste the text manually into the box below, or 2) Use ilovepdf.com OCR tool to convert it first.');
+      }
+      throw new Error('Upload failed. Please try again.');
+    }
 
     // 2. Generate
     $('loading-msg').textContent = 'Gemini is crafting recall questions…';
