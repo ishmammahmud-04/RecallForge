@@ -69,10 +69,12 @@ def upload_files():
     print(f"Stored {char_count} characters")
 
     if char_count < 20:
+        # Check if files were uploaded — if so, likely image-based PDF
+        if files and any(f.filename.endswith('.pdf') for f in files):
+            return jsonify({"error": "image_pdf"}), 400
         return jsonify({"error": "No readable text found in uploaded files."}), 400
 
     return jsonify({"message": f"Successfully stored {char_count} characters!"})
-
 
 @app.route('/api/generate', methods=['POST'])
 def generate_questions():
